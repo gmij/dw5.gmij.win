@@ -1,0 +1,67 @@
+name: Build Json
+on:
+  schedule:
+    - cron: '0 */2 * * *' # every 4 hours
+  workflow_dispatch:
+concurrency: 
+  group: ${{ github.workflow }}-${{ github.ref }}
+  #cancel-in-progress: true  
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Maximize build space
+      uses: gmij/max-build-space@main
+      with:
+        root-reserve-mb: 512
+        swap-size-mb: 1024
+        remove-android: 'true'
+        remove-haskell: 'true'
+        remove-docker-images: 'true'
+        remove-codeql: 'true'
+        remove-large-packages: 'true'
+        remove-tool-cache: 'true'
+        
+    - name: check diskspace
+      run: |
+        df -H
+
+    - uses: actions/checkout@v4
+      with:
+        repository: gmij/wallpaper.robot
+        token: ${{ secrets.PAT }}
+        path: downloader
+        sparse-checkout: publish
+        
+    - uses: actions/checkout@v4
+      with: 
+        path: wallpaper
+        
+        
+    - name: Download Wallpaper
+      run: |
+        cd downloader/publish
+        chmod +x ./Pic.Downloader
+        ./Pic.Downloader
+
+    - name: BuildIndexJson
+      run: |
+        cd downloader/publish
+        chmod +x ./BuildIndexJson
+        ./BuildIndexJson
+
+
+    - name: Commit Changes
+      run: |
+        cd wallpaper
+        git config --local user.email "gmij@qq.com"
+        git config --local user.name "Gmij with Github Actions"
+        git checkout --orphan latest
+        git add .
+        git commit -am "update...."
+        git branch -D main
+        git branch -m main
+        git push -f origin main
+    - name: check disk
+      run: |
+        df -H        
