@@ -16,9 +16,6 @@ jobs:
           token: ${{ secrets.PAT }}
           path: downloader
           sparse-checkout: publish
-      - uses: actions/checkout@v4
-        with:
-          path: wallpaper
       - name: Download Wallpaper
         run: |
           cd downloader/publish
