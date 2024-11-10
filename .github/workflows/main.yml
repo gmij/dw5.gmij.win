@@ -3,65 +3,92 @@ on:
   schedule:
     - cron: '0 */2 * * *' # every 4 hours
   workflow_dispatch:
-concurrency: 
+concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  #cancel-in-progress: true  
+  cancel-in-progress: true
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-    - name: Maximize build space
-      uses: gmij/max-build-space@main
-      with:
-        root-reserve-mb: 512
-        swap-size-mb: 1024
-        remove-android: 'true'
-        remove-haskell: 'true'
-        remove-docker-images: 'true'
-        remove-codeql: 'true'
-        remove-large-packages: 'true'
-        remove-tool-cache: 'true'
-        
-    - name: check diskspace
-      run: |
-        df -H
-
-    - uses: actions/checkout@v4
-      with:
-        repository: gmij/wallpaper.robot
-        token: ${{ secrets.PAT }}
-        path: downloader
-        sparse-checkout: publish
-        
-    - uses: actions/checkout@v4
-      with: 
-        path: wallpaper
-        
-        
-    - name: Download Wallpaper
-      run: |
-        cd downloader/publish
-        chmod +x ./Pic.Downloader
-        ./Pic.Downloader
-
-    - name: BuildIndexJson
-      run: |
-        cd downloader/publish
-        chmod +x ./BuildIndexJson
-        ./BuildIndexJson
-
-
-    - name: Commit Changes
-      run: |
-        cd wallpaper
-        git config --local user.email "gmij@qq.com"
-        git config --local user.name "Gmij with Github Actions"
-        git checkout --orphan latest
-        git add .
-        git commit -am "update...."
-        git branch -D main
-        git branch -m main
-        git push -f origin main
-    - name: check disk
-      run: |
-        df -H        
+      - uses: actions/checkout@v4
+        with:
+          repository: gmij/wallpaper.robot
+          token: ${{ secrets.PAT }}
+          path: downloader
+          sparse-checkout: publish
+      - uses: actions/checkout@v4
+        with:
+          path: wallpaper
+      - name: Download Wallpaper
+        run: |
+          cd downloader/publish
+          chmod +x ./Pic.Downloader
+          ./Pic.Downloader
+      - name: BuildIndexJson
+        run: |
+          cd downloader/publish
+          chmod +x ./BuildIndexJson
+          ./BuildIndexJson
+      - name: Commit Changes
+        id: commit
+        uses: actions/github-script@v6
+        with:
+          script: |
+            (async () => {
+              const fs = require('fs');
+              const path = require('path');
+              const wallpaperDir = path.join(process.env.GITHUB_WORKSPACE, 'wallpaper');
+              const { data: currentCommit } = await github.rest.repos.getCommit({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                ref: 'main'
+              });
+              const treeItems = [];
+              const traverseDir = async (dir, basePath) => {
+                const files = fs.readdirSync(dir);
+                for (const file of files) {
+                  const filePath = path.join(dir, file);
+                  const relativePath = path.join(basePath, file);
+                  if (fs.statSync(filePath).isDirectory()) {
+                    if (file === '.git') {
+                      continue; // 跳过 .git 目录
+                    }
+                    await traverseDir(filePath, relativePath);
+                  } else {
+                    const content = fs.readFileSync(filePath, 'utf-8');
+                    const newBlob = await github.rest.git.createBlob({
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      content: content,
+                      encoding: 'utf-8'
+                    });
+                    treeItems.push({
+                      path: relativePath,
+                      mode: '100644',
+                      type: 'blob',
+                      sha: newBlob.data.sha
+                    });
+                  }
+                }
+              };
+              await traverseDir(wallpaperDir, '');
+              const newTree = await github.rest.git.createTree({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                base_tree: currentCommit.commit.tree.sha,
+                tree: treeItems
+              });
+              const newCommit = await github.rest.git.createCommit({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                message: 'update....',
+                tree: newTree.data.sha,
+                parents: [currentCommit.sha]
+              });
+              await github.rest.git.updateRef({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                ref: 'heads/main',
+                sha: newCommit.data.sha
+              });
+            })();
